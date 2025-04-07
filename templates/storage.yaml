@@ -1,44 +1,41 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: {{ .Values.storage.storageClassName }}
-  namespace: {{ include "vprofile.namespace" . }}
-  labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
-  annotations:
-    {{- range $key, $value := .Values.storage.annotations }}
-    {{ $key }}: {{ $value | quote }}
-    {{- end }}
-provisioner: {{ .Values.storage.provisioner }}
-volumeBindingMode: {{ .Values.storage.volumeBindingMode }}
-reclaimPolicy: {{ .Values.storage.reclaimPolicy }}
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mysql-pvc
-  namespace: {{ include "vprofile.namespace" . }}
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/name: mysql-pvc
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
 spec:
-  storageClassName: {{ .Values.storage.storageClassName }}
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.storage.mysql.size }}
+      storage: {{ .Values.db.storage.size }}
+  {{- if .Values.db.storage.storageClass }}
+  storageClassName: {{ .Values.db.storage.storageClass }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: rabbitmq-pvc
-  namespace: {{ include "vprofile.namespace" . }}
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/name: rabbitmq-pvc
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
 spec:
-  storageClassName: {{ .Values.storage.storageClassName }}
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.storage.rabbitmq.size }}
+      storage: {{ .Values.rabbitmq.storage.size }}
+  {{- if .Values.rabbitmq.storage.storageClass }}
+  storageClassName: {{ .Values.rabbitmq.storage.storageClass }}
+  {{- end }}

@@ -1,0 +1,15 @@
+{{- if and .Values.resourceQuota.enabled (eq .Values.global.environment "test") }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ .Release.Name }}-quota
+  namespace: {{ .Values.namespaceConfig.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-quota
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
+spec:
+  {{ toYaml .Values.resourceQuota.spec }}
+{{- end }}

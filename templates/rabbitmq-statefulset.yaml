@@ -2,13 +2,17 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ .Values.rabbitmq.name }}
-  namespace: {{ include "vprofile.namespace" . }}
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ .Values.rabbitmq.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
     app: {{ .Values.rabbitmq.name }}
 spec:
-  serviceName: {{ .Values.rabbitmq.service.name }}
-  replicas: 1
+  serviceName: {{ .Values.rabbitmq.name }}-service
+  replicas: {{ .Values.rabbitmq.replicas }}
   selector:
     matchLabels:
       app: {{ .Values.rabbitmq.name }}
@@ -16,94 +20,81 @@ spec:
     metadata:
       labels:
         app: {{ .Values.rabbitmq.name }}
-        {{- include "vprofile.labels" . | nindent 8 }}
+        app.kubernetes.io/name: {{ .Values.rabbitmq.name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
       - name: rabbitmq
         image: {{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}
         imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
         ports:
-        {{- range .Values.rabbitmq.service.ports }}
-        - containerPort: {{ .port }}
-          name: {{ .name }}
-        {{- end }}
+        - containerPort: {{ .Values.rabbitmq.service.port }}
+          name: amqp
+        - containerPort: {{ .Values.rabbitmq.service.managementPort }}
+          name: management
         env:
         - name: RABBITMQ_DEFAULT_USER
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.rabbitmq.name }}
+              name: rabbitmq-secrets
               key: rabbitmq-user
         - name: RABBITMQ_DEFAULT_PASS
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.rabbitmq.name }}
+              name: rabbitmq-secrets
               key: rabbitmq-password
         resources:
-          {{- toYaml .Values.rabbitmq.resources | nindent 10 }}
+          requests:
+            memory: {{ .Values.rabbitmq.resources.requests.memory | quote }}
+            cpu: {{ .Values.rabbitmq.resources.requests.cpu | quote }}
+          limits:
+            memory: {{ .Values.rabbitmq.resources.limits.memory | quote }}
+            cpu: {{ .Values.rabbitmq.resources.limits.cpu | quote }}
         livenessProbe:
-          tcpSocket:
-            port: 5672
-          initialDelaySeconds: {{ .Values.rabbitmq.probe.initialDelaySeconds }}
-          periodSeconds: {{ .Values.rabbitmq.probe.periodSeconds }}
-          timeoutSeconds: {{ .Values.rabbitmq.probe.timeoutSeconds }}
+          exec:
+            command: ["rabbitmq-diagnostics", "status"]
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
         readinessProbe:
-          tcpSocket:
-            port: 5672
-          initialDelaySeconds: {{ .Values.rabbitmq.probe.readinessInitialDelaySeconds }}
-          periodSeconds: {{ .Values.rabbitmq.probe.readinessPeriodSeconds }}
-          timeoutSeconds: {{ .Values.rabbitmq.probe.readinessTimeoutSeconds }}
+          exec:
+            command: ["rabbitmq-diagnostics", "ping"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
         volumeMounts:
         - name: rabbitmq-data
           mountPath: /var/lib/rabbitmq
         - name: rabbitmq-config
           mountPath: /etc/rabbitmq/rabbitmq.conf
           subPath: rabbitmq.conf
-      initContainers:
-      - name: init-rabbitmq
-        image: busybox:1.35
-        command: ['sh', '-c', 'echo "Waiting for resources to be ready..."; sleep 10']
       volumes:
-      - name: rabbitmq-data
-        persistentVolumeClaim:
-          claimName: rabbitmq-pvc
       - name: rabbitmq-config
         configMap:
           name: rabbitmq-config
+      - name: rabbitmq-data
+        persistentVolumeClaim:
+          claimName: rabbitmq-pvc
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.rabbitmq.service.name }}
-  namespace: {{ include "vprofile.namespace" . }}
+  name: {{ .Values.rabbitmq.name }}-service
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
     app: {{ .Values.rabbitmq.name }}
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ .Values.rabbitmq.name }}-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
 spec:
+  ports:
+  - port: {{ .Values.rabbitmq.service.port }}
+    targetPort: amqp
+    name: amqp
+  - port: {{ .Values.rabbitmq.service.managementPort }}
+    targetPort: management
+    name: management
   selector:
     app: {{ .Values.rabbitmq.name }}
-  ports:
-  {{- range .Values.rabbitmq.service.ports }}
-  - port: {{ .port }}
-    targetPort: {{ .name }}
-    name: {{ .name }}
-  {{- end }}
-  clusterIP: None
----
-# Regular service for backward compatibility
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ .Values.rabbitmq.legacyServiceName }}
-  namespace: {{ include "vprofile.namespace" . }}
-  labels:
-    app: {{ .Values.rabbitmq.name }}
-    {{- include "vprofile.labels" . | nindent 4 }}
-spec:
-  selector:
-    app: {{ .Values.rabbitmq.name }}
-  ports:
-  {{- range .Values.rabbitmq.service.ports }}
-  - port: {{ .port }}
-    targetPort: {{ .name }}
-    name: {{ .name }}
-  {{- end }}

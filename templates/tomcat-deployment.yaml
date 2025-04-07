@@ -1,16 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Values.tomcat.name }}
-  namespace: {{ include "vprofile.namespace" . }}
+  name: {{ .Values.app.name }}
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
-    app: {{ .Values.tomcat.name }}
+    app.kubernetes.io/name: {{ .Values.app.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
+    app: {{ .Values.app.name }}
 spec:
-  replicas: {{ .Values.tomcat.replicas }}
+  replicas: {{ .Values.app.replicas }}
   selector:
     matchLabels:
-      app: {{ .Values.tomcat.name }}
+      app: {{ .Values.app.name }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -19,63 +23,69 @@ spec:
   template:
     metadata:
       labels:
-        app: {{ .Values.tomcat.name }}
-        {{- include "vprofile.labels" . | nindent 8 }}
+        app: {{ .Values.app.name }}
+        app.kubernetes.io/name: {{ .Values.app.name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       initContainers:
       - name: wait-for-mysql
         image: busybox:1.35
-        command: ['sh', '-c', 'until nc -z {{ .Values.mysql.service.name }} {{ .Values.mysql.service.port }}; do echo "waiting for mysql"; sleep 5; done;']
+        command: ['sh', '-c', 'until nc -z {{ .Values.db.name }}-service {{ .Values.db.service.port }}; do echo "waiting for mysql"; sleep 5; done;']
       - name: wait-for-rabbitmq
         image: busybox:1.35
-        command: ['sh', '-c', 'until nc -z {{ .Values.rabbitmq.service.name }} 5672; do echo "waiting for rabbitmq"; sleep 5; done;']
+        command: ['sh', '-c', 'until nc -z {{ .Values.rabbitmq.name }}-service {{ .Values.rabbitmq.service.port }}; do echo "waiting for rabbitmq"; sleep 5; done;']
       - name: wait-for-memcached
         image: busybox:1.35
-        command: ['sh', '-c', 'until nc -z {{ .Values.memcached.service.name }} {{ .Values.memcached.service.port }}; do echo "waiting for memcached"; sleep 5; done;']
+        command: ['sh', '-c', 'until nc -z {{ .Values.memcached.name }}-service {{ .Values.memcached.service.port }}; do echo "waiting for memcached"; sleep 5; done;']
       containers:
-      - name: {{ .Values.tomcat.name }}
-        image: {{ .Values.tomcat.image.repository }}:{{ .Values.tomcat.image.tag }}
-        imagePullPolicy: {{ .Values.tomcat.image.pullPolicy }}
+      - name: {{ .Values.app.name }}
+        image: {{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}
+        imagePullPolicy: {{ .Values.app.image.pullPolicy }}
         ports:
-        - containerPort: {{ .Values.tomcat.service.port }}
+        - containerPort: 8080
           name: app-port
         env:
         - name: DB_USER
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.db.name }}
+              name: db-secrets
               key: db-user
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.db.name }}
+              name: db-secrets
               key: db-password
         - name: RABBITMQ_USER
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.rabbitmq.name }}
+              name: rabbitmq-secrets
               key: rabbitmq-user
         - name: RABBITMQ_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.secrets.rabbitmq.name }}
+              name: rabbitmq-secrets
               key: rabbitmq-password
         resources:
-          {{- toYaml .Values.tomcat.resources | nindent 10 }}
+          requests:
+            memory: {{ .Values.app.resources.requests.memory | quote }}
+            cpu: {{ .Values.app.resources.requests.cpu | quote }}
+          limits:
+            memory: {{ .Values.app.resources.limits.memory | quote }}
+            cpu: {{ .Values.app.resources.limits.cpu | quote }}
         livenessProbe:
           httpGet:
             path: /login
-            port: {{ .Values.tomcat.service.port }}
-          initialDelaySeconds: {{ .Values.tomcat.probe.initialDelaySeconds }}
-          periodSeconds: {{ .Values.tomcat.probe.periodSeconds }}
-          timeoutSeconds: {{ .Values.tomcat.probe.timeoutSeconds }}
+            port: 8080
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 10
         readinessProbe:
           httpGet:
             path: /login
-            port: {{ .Values.tomcat.service.port }}
-          initialDelaySeconds: {{ .Values.tomcat.probe.readinessInitialDelaySeconds }}
-          periodSeconds: {{ .Values.tomcat.probe.readinessPeriodSeconds }}
-          timeoutSeconds: {{ .Values.tomcat.probe.readinessTimeoutSeconds }}
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 5
         volumeMounts:
         - name: app-config
           mountPath: /usr/local/tomcat/application.properties
@@ -88,44 +98,52 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.tomcat.service.name }}
-  namespace: {{ include "vprofile.namespace" . }}
+  name: {{ .Values.app.name }}-service
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    app: {{ .Values.tomcat.name }}
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.app.name }}
+    app.kubernetes.io/name: {{ .Values.app.name }}-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
 spec:
   selector:
-    app: {{ .Values.tomcat.name }}
+    app: {{ .Values.app.name }}
   ports:
-  - port: {{ .Values.tomcat.service.port }}
+  - port: 8080
     targetPort: app-port
-{{ if .Values.tomcat.autoscaling.enabled }}
+{{- if .Values.app.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ .Values.tomcat.name }}-hpa
-  namespace: {{ include "vprofile.namespace" . }}
+  name: {{ .Values.app.name }}-hpa
+  namespace: {{ .Values.namespaceConfig.name }}
   labels:
-    {{- include "vprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ .Values.app.name }}-hpa
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    environment: {{ .Values.global.environment }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ .Values.tomcat.name }}
-  minReplicas: {{ .Values.tomcat.autoscaling.minReplicas }}
-  maxReplicas: {{ .Values.tomcat.autoscaling.maxReplicas }}
+    name: {{ .Values.app.name }}
+  minReplicas: {{ .Values.app.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.app.autoscaling.maxReplicas }}
   metrics:
   - type: Resource
     resource:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: {{ .Values.tomcat.autoscaling.targetCPUUtilizationPercentage }}
+        averageUtilization: {{ .Values.app.autoscaling.targetCPUUtilizationPercentage }}
   - type: Resource
     resource:
       name: memory
       target:
         type: Utilization
-        averageUtilization: {{ .Values.tomcat.autoscaling.targetMemoryUtilizationPercentage }}
-{{ end }}
+        averageUtilization: {{ .Values.app.autoscaling.targetMemoryUtilizationPercentage }}
+{{- end }}
