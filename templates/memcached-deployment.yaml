@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.memcached.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.memcached.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.memcached.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.memcached.name }}
+        {{- include "vprofile.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Values.memcached.name }}
+        image: {{ .Values.memcached.image.repository }}:{{ .Values.memcached.image.tag }}
+        imagePullPolicy: {{ .Values.memcached.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.memcached.service.port }}
+          name: memcache-port
+        resources:
+          {{- toYaml .Values.memcached.resources | nindent 10 }}
+        livenessProbe:
+          tcpSocket:
+            port: {{ .Values.memcached.service.port }}
+          initialDelaySeconds: {{ .Values.memcached.probe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.memcached.probe.periodSeconds }}
+          timeoutSeconds: {{ .Values.memcached.probe.timeoutSeconds }}
+        readinessProbe:
+          tcpSocket:
+            port: {{ .Values.memcached.service.port }}
+          initialDelaySeconds: {{ .Values.memcached.probe.readinessInitialDelaySeconds }}
+          periodSeconds: {{ .Values.memcached.probe.readinessPeriodSeconds }}
+          timeoutSeconds: {{ .Values.memcached.probe.readinessTimeoutSeconds }}
+      initContainers:
+      - name: init-memcached
+        image: busybox:1.35
+        command: ['sh', '-c', 'echo "Waiting for resources to be ready..."; sleep 5']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.memcached.service.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.memcached.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.memcached.name }}
+  ports:
+  - port: {{ .Values.memcached.service.port }}
+    targetPort: memcache-port
