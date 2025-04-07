@@ -1,0 +1,39 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+The application is deployed in the {{ include "vprofile.namespace" . }} namespace.
+
+To access the application:
+
+{{- if .Values.ingress.enabled }}
+1. Access the application through the Ingress:
+   {{- range .Values.ingress.hosts }}
+   - http://{{ .host }}
+   {{- end }}
+{{- else if .Values.nginx.loadBalancer.enabled }}
+1. Access the application through the LoadBalancer:
+   export SERVICE_IP=$(kubectl get svc --namespace {{ include "vprofile.namespace" . }} {{ .Values.nginx.loadBalancer.name }} --template "{{ "{{ range (index .status.loadBalancer.ingress 0) }}{{ . }}{{ end }}" }}")
+   echo http://$SERVICE_IP
+{{- else }}
+1. Port forward to the Nginx service:
+   kubectl port-forward --namespace {{ include "vprofile.namespace" . }} svc/{{ .Values.nginx.service.name }} 8080:{{ .Values.nginx.service.port }}
+   
+   Then access the application at http://localhost:8080
+{{- end }}
+
+For more information about the components:
+
+- MySQL Database is running in StatefulSet mode
+- RabbitMQ is running in StatefulSet mode
+- Memcached is deployed for caching
+- Tomcat application is running with {{ .Values.tomcat.replicas }} replicas
+- Nginx is serving as the frontend proxy
+
+{{- if .Values.tomcat.autoscaling.enabled }}
+The Tomcat application is configured with HorizontalPodAutoscaler:
+- Min replicas: {{ .Values.tomcat.autoscaling.minReplicas }}
+- Max replicas: {{ .Values.tomcat.autoscaling.maxReplicas }}
+- Target CPU utilization: {{ .Values.tomcat.autoscaling.targetCPUUtilizationPercentage }}%
+- Target Memory utilization: {{ .Values.tomcat.autoscaling.targetMemoryUtilizationPercentage }}%
+{{- end }}
