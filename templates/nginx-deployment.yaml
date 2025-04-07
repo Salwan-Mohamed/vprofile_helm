@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.nginx.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.nginx.name }}
+spec:
+  replicas: {{ .Values.nginx.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.nginx.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.nginx.name }}
+        {{- include "vprofile.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Values.nginx.name }}
+        image: {{ .Values.nginx.image.repository }}:{{ .Values.nginx.image.tag }}
+        imagePullPolicy: {{ .Values.nginx.image.pullPolicy }}
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          {{- toYaml .Values.nginx.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: {{ .Values.nginx.probe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.nginx.probe.periodSeconds }}
+          timeoutSeconds: {{ .Values.nginx.probe.timeoutSeconds }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: {{ .Values.nginx.probe.readinessInitialDelaySeconds }}
+          periodSeconds: {{ .Values.nginx.probe.readinessPeriodSeconds }}
+          timeoutSeconds: {{ .Values.nginx.probe.readinessTimeoutSeconds }}
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/vproapp.conf
+          subPath: vproapp.conf
+      initContainers:
+      - name: wait-for-app
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z {{ .Values.tomcat.service.name }} {{ .Values.tomcat.service.port }}; do echo "waiting for app"; sleep 5; done;']
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.nginx.service.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.nginx.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.nginx.name }}
+  ports:
+  - port: {{ .Values.nginx.service.port }}
+    targetPort: http
+    name: http
+  type: {{ .Values.nginx.service.type }}
+{{ if .Values.nginx.loadBalancer.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.nginx.loadBalancer.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.nginx.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.nginx.name }}
+  ports:
+  - port: {{ .Values.nginx.service.port }}
+    targetPort: http
+    name: http
+  type: {{ .Values.nginx.loadBalancer.type }}
+  {{- if .Values.nginx.loadBalancer.ip }}
+  loadBalancerIP: {{ .Values.nginx.loadBalancer.ip }}
+  {{- end }}
+{{ end }}
