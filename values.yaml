@@ -1,0 +1,253 @@
+# Global configuration
+global:
+  namespace: vproproject
+  
+# Storage configuration
+storage:
+  storageClassName: openebs-sc
+  annotations:
+    openebs.io/cas-type: local
+    cas.openebs.io/config: |
+      - name: StorageType
+        value: "hostpath"
+      - name: BasePath
+        value: "/var/openebs/local"
+  provisioner: openebs.io/local
+  volumeBindingMode: WaitForFirstConsumer
+  reclaimPolicy: Delete
+  mysql:
+    size: 5Gi
+  rabbitmq:
+    size: 5Gi
+
+# MySQL configuration
+mysql:
+  name: mysql-db
+  image:
+    repository: salwansaied/vroproject
+    tag: db
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  service:
+    name: mysql-db-service
+    port: 3306
+  legacyServiceName: vprodb-service
+  probe:
+    initialDelaySeconds: 120
+    periodSeconds: 20
+    timeoutSeconds: 10
+    readinessInitialDelaySeconds: 60
+    readinessPeriodSeconds: 10
+    readinessTimeoutSeconds: 5
+  
+# RabbitMQ configuration
+rabbitmq:
+  name: rabbitmq
+  image:
+    repository: salwansaied/vroproject
+    tag: rmq
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  service:
+    name: rabbitmq-service
+    ports:
+      - name: rmq-port
+        port: 5672
+      - name: rmq-mgmt-port
+        port: 15672
+  legacyServiceName: vpromq-service
+  probe:
+    initialDelaySeconds: 120
+    periodSeconds: 20
+    timeoutSeconds: 10
+    readinessInitialDelaySeconds: 60
+    readinessPeriodSeconds: 10
+    readinessTimeoutSeconds: 5
+  config:
+    content: |
+      loopback_users = none
+      listeners.tcp.default = 5672
+      management.tcp.port = 15672
+  
+# Memcached configuration
+memcached:
+  name: vprocache
+  image:
+    repository: salwansaied/vroproject
+    tag: mc
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  service:
+    name: vprocache-service
+    port: 11211
+  probe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    readinessInitialDelaySeconds: 15
+    readinessPeriodSeconds: 5
+    readinessTimeoutSeconds: 3
+  
+# Tomcat application configuration
+tomcat:
+  name: vproapp
+  replicas: 3
+  image:
+    repository: salwansaied/vroproject
+    tag: app
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 200m
+    limits:
+      memory: 1024Mi
+      cpu: 500m
+  service:
+    name: vproapp-service
+    port: 8080
+  probe:
+    initialDelaySeconds: 180
+    periodSeconds: 30
+    timeoutSeconds: 10
+    readinessInitialDelaySeconds: 120
+    readinessPeriodSeconds: 10
+    readinessTimeoutSeconds: 5
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  config:
+    content: |
+      #JDBC Configutation for Database Connection
+      jdbc.driverClassName=com.mysql.jdbc.Driver
+      jdbc.url=jdbc:mysql://mysql-db-service:3306/accounts?useUnicode=true&characterEncoding=UTF-8&zeroDateTimeBehavior=convertToNull
+      jdbc.username=${DB_USER}
+      jdbc.password=${DB_PASSWORD}
+
+      #Memcached Configuration For Active and StandBy Host
+      #For Active Host
+      memcached.active.host=vprocache-service
+      memcached.active.port=11211
+      #For StandBy Host
+      memcached.standBy.host=vprocache-service
+      memcached.standBy.port=11211
+
+      #RabbitMQ Configuration
+      rabbitmq.address=rabbitmq-service
+      rabbitmq.port=5672
+      rabbitmq.username=${RABBITMQ_USER}
+      rabbitmq.password=${RABBITMQ_PASSWORD}
+
+      #Elasticesearch Configuration
+      elasticsearch.host=elasticsearch-service
+      elasticsearch.port=9300
+      elasticsearch.cluster=vprofile
+      elasticsearch.node=vprofilenode
+  
+# Nginx frontend configuration
+nginx:
+  name: vproweb
+  replicas: 1
+  image:
+    repository: salwansaied/vroproject
+    tag: web
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  service:
+    name: vproweb-service
+    port: 80
+    type: ClusterIP
+  loadBalancer:
+    enabled: true
+    name: vproweb-lb
+    type: LoadBalancer
+    ip: 10.1.5.100
+  probe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    readinessInitialDelaySeconds: 15
+    readinessPeriodSeconds: 5
+    readinessTimeoutSeconds: 3
+  config:
+    content: |
+      upstream vproapp {
+          server vproapp-service:8080;
+      }
+
+      server {
+          listen 80;
+          
+          location / {
+              proxy_pass http://vproapp;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+      }
+
+# Ingress configuration
+ingress:
+  enabled: true
+  name: vprofile-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: vprofile.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: vproweb-service
+          port: 80
+
+# MetalLB configuration
+metallb:
+  enabled: true
+  namespace: metallb-system
+  configName: config
+  addressPool:
+    name: default
+    protocol: layer2
+    addresses:
+      - 10.1.5.81-10.1.5.199
+
+# Secrets configuration
+secrets:
+  db:
+    name: db-secrets
+    root_password: admin123
+    db_password: admin123
+    db_user: admin
+    db_name: accounts
+  rabbitmq:
+    name: rabbitmq-secrets
+    rabbitmq_user: test
+    rabbitmq_password: test
