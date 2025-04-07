@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.rabbitmq.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.rabbitmq.name }}
+spec:
+  serviceName: {{ .Values.rabbitmq.service.name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.rabbitmq.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.rabbitmq.name }}
+        {{- include "vprofile.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: rabbitmq
+        image: {{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}
+        imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+        ports:
+        {{- range .Values.rabbitmq.service.ports }}
+        - containerPort: {{ .port }}
+          name: {{ .name }}
+        {{- end }}
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.rabbitmq.name }}
+              key: rabbitmq-user
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.rabbitmq.name }}
+              key: rabbitmq-password
+        resources:
+          {{- toYaml .Values.rabbitmq.resources | nindent 10 }}
+        livenessProbe:
+          tcpSocket:
+            port: 5672
+          initialDelaySeconds: {{ .Values.rabbitmq.probe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.rabbitmq.probe.periodSeconds }}
+          timeoutSeconds: {{ .Values.rabbitmq.probe.timeoutSeconds }}
+        readinessProbe:
+          tcpSocket:
+            port: 5672
+          initialDelaySeconds: {{ .Values.rabbitmq.probe.readinessInitialDelaySeconds }}
+          periodSeconds: {{ .Values.rabbitmq.probe.readinessPeriodSeconds }}
+          timeoutSeconds: {{ .Values.rabbitmq.probe.readinessTimeoutSeconds }}
+        volumeMounts:
+        - name: rabbitmq-data
+          mountPath: /var/lib/rabbitmq
+        - name: rabbitmq-config
+          mountPath: /etc/rabbitmq/rabbitmq.conf
+          subPath: rabbitmq.conf
+      initContainers:
+      - name: init-rabbitmq
+        image: busybox:1.35
+        command: ['sh', '-c', 'echo "Waiting for resources to be ready..."; sleep 10']
+      volumes:
+      - name: rabbitmq-data
+        persistentVolumeClaim:
+          claimName: rabbitmq-pvc
+      - name: rabbitmq-config
+        configMap:
+          name: rabbitmq-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.rabbitmq.service.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.rabbitmq.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.rabbitmq.name }}
+  ports:
+  {{- range .Values.rabbitmq.service.ports }}
+  - port: {{ .port }}
+    targetPort: {{ .name }}
+    name: {{ .name }}
+  {{- end }}
+  clusterIP: None
+---
+# Regular service for backward compatibility
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.rabbitmq.legacyServiceName }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.rabbitmq.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.rabbitmq.name }}
+  ports:
+  {{- range .Values.rabbitmq.service.ports }}
+  - port: {{ .port }}
+    targetPort: {{ .name }}
+    name: {{ .name }}
+  {{- end }}
