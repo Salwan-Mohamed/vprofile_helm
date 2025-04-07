@@ -1,0 +1,18 @@
+{{ if .Values.metallb.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ .Values.metallb.namespace }}
+  name: {{ .Values.metallb.configName }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+data:
+  config: |
+    address-pools:
+    - name: {{ .Values.metallb.addressPool.name }}
+      protocol: {{ .Values.metallb.addressPool.protocol }}
+      addresses:
+      {{- range .Values.metallb.addressPool.addresses }}
+      - {{ . }}
+      {{- end }}
+{{ end }}
