@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.tomcat.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.tomcat.name }}
+spec:
+  replicas: {{ .Values.tomcat.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.tomcat.name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.tomcat.name }}
+        {{- include "vprofile.labels" . | nindent 8 }}
+    spec:
+      initContainers:
+      - name: wait-for-mysql
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z {{ .Values.mysql.service.name }} {{ .Values.mysql.service.port }}; do echo "waiting for mysql"; sleep 5; done;']
+      - name: wait-for-rabbitmq
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z {{ .Values.rabbitmq.service.name }} 5672; do echo "waiting for rabbitmq"; sleep 5; done;']
+      - name: wait-for-memcached
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z {{ .Values.memcached.service.name }} {{ .Values.memcached.service.port }}; do echo "waiting for memcached"; sleep 5; done;']
+      containers:
+      - name: {{ .Values.tomcat.name }}
+        image: {{ .Values.tomcat.image.repository }}:{{ .Values.tomcat.image.tag }}
+        imagePullPolicy: {{ .Values.tomcat.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.tomcat.service.port }}
+          name: app-port
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: db-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: db-password
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.rabbitmq.name }}
+              key: rabbitmq-user
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.rabbitmq.name }}
+              key: rabbitmq-password
+        resources:
+          {{- toYaml .Values.tomcat.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /login
+            port: {{ .Values.tomcat.service.port }}
+          initialDelaySeconds: {{ .Values.tomcat.probe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.tomcat.probe.periodSeconds }}
+          timeoutSeconds: {{ .Values.tomcat.probe.timeoutSeconds }}
+        readinessProbe:
+          httpGet:
+            path: /login
+            port: {{ .Values.tomcat.service.port }}
+          initialDelaySeconds: {{ .Values.tomcat.probe.readinessInitialDelaySeconds }}
+          periodSeconds: {{ .Values.tomcat.probe.readinessPeriodSeconds }}
+          timeoutSeconds: {{ .Values.tomcat.probe.readinessTimeoutSeconds }}
+        volumeMounts:
+        - name: app-config
+          mountPath: /usr/local/tomcat/application.properties
+          subPath: application.properties
+      volumes:
+      - name: app-config
+        configMap:
+          name: vproapp-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.tomcat.service.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.tomcat.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Values.tomcat.name }}
+  ports:
+  - port: {{ .Values.tomcat.service.port }}
+    targetPort: app-port
+{{ if .Values.tomcat.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.tomcat.name }}-hpa
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.tomcat.name }}
+  minReplicas: {{ .Values.tomcat.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.tomcat.autoscaling.maxReplicas }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.tomcat.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.tomcat.autoscaling.targetMemoryUtilizationPercentage }}
+{{ end }}
