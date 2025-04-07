@@ -1,0 +1,44 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.storageClassName }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+  annotations:
+    {{- range $key, $value := .Values.storage.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+provisioner: {{ .Values.storage.provisioner }}
+volumeBindingMode: {{ .Values.storage.volumeBindingMode }}
+reclaimPolicy: {{ .Values.storage.reclaimPolicy }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  storageClassName: {{ .Values.storage.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.mysql.size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-pvc
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  storageClassName: {{ .Values.storage.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.rabbitmq.size }}
