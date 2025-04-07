@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.mysql.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    {{- include "vprofile.labels" . | nindent 4 }}
+    app: {{ .Values.mysql.name }}
+spec:
+  serviceName: {{ .Values.mysql.service.name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.mysql.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.mysql.name }}
+        {{- include "vprofile.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: mysql
+        image: {{ .Values.mysql.image.repository }}:{{ .Values.mysql.image.tag }}
+        imagePullPolicy: {{ .Values.mysql.image.pullPolicy }}
+        ports:
+        - containerPort: 3306
+          name: db-port
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: root-password
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: db-name
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: db-user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.db.name }}
+              key: db-password
+        resources:
+          {{- toYaml .Values.mysql.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "mysqladmin ping -uroot -p\"${MYSQL_ROOT_PASSWORD}\""
+          initialDelaySeconds: {{ .Values.mysql.probe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.mysql.probe.periodSeconds }}
+          timeoutSeconds: {{ .Values.mysql.probe.timeoutSeconds }}
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "mysqladmin ping -uroot -p\"${MYSQL_ROOT_PASSWORD}\""
+          initialDelaySeconds: {{ .Values.mysql.probe.readinessInitialDelaySeconds }}
+          periodSeconds: {{ .Values.mysql.probe.readinessPeriodSeconds }}
+          timeoutSeconds: {{ .Values.mysql.probe.readinessTimeoutSeconds }}
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+      initContainers:
+      - name: init-mysql
+        image: busybox:1.35
+        command: ['sh', '-c', 'echo "Waiting for mysql volume to be ready..."; sleep 5']
+      volumes:
+      - name: mysql-data
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.mysql.service.name }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.mysql.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  ports:
+  - port: {{ .Values.mysql.service.port }}
+    targetPort: db-port
+    name: db-port
+  selector:
+    app: {{ .Values.mysql.name }}
+  clusterIP: None
+---
+# Add a regular service for backward compatibility
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.mysql.legacyServiceName }}
+  namespace: {{ include "vprofile.namespace" . }}
+  labels:
+    app: {{ .Values.mysql.name }}
+    {{- include "vprofile.labels" . | nindent 4 }}
+spec:
+  ports:
+  - port: {{ .Values.mysql.service.port }}
+    targetPort: db-port
+    name: db-port
+  selector:
+    app: {{ .Values.mysql.name }}
