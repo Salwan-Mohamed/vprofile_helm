@@ -1,0 +1,78 @@
+# Production environment specific values for vroproject
+global:
+  environment: production
+  namespace: production
+
+namespaceConfig:
+  name: production
+
+# Production has higher resource configurations
+app:
+  replicas: 5
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 300m
+    limits:
+      memory: 2Gi
+      cpu: 600m
+  autoscaling:
+    minReplicas: 5
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+web:
+  replicas: 2
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 150m
+    limits:
+      memory: 512Mi
+      cpu: 300m
+
+db:
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 200m
+    limits:
+      memory: 1Gi
+      cpu: 600m
+  storage:
+    size: 5Gi
+
+rabbitmq:
+  replicas: 3
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 200m
+    limits:
+      memory: 1Gi
+      cpu: 400m
+  storage:
+    size: 2Gi
+
+memcached:
+  replicas: 2
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+
+ingress:
+  enabled: true
+  hosts:
+    - host: vproapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: vproapp-tls
+      hosts:
+        - vproapp.example.com
